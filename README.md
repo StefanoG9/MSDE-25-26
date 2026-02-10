@@ -157,7 +157,3 @@ install.packages(c(
 - Hamilton, J. D. (1994). *Time Series Analysis*. Princeton University Press.
 - Lütkepohl, H. (2005). *New Introduction to Multiple Time Series Analysis*. Springer.
 - Wei, W. W. S. (2006). *Time Series Analysis: Univariate and Multivariate Methods*, 2nd ed. Pearson.
-
-## Licenza
-
-Questo progetto è distribuito a scopo didattico. I dati provengono dal [FRED](https://fred.stlouisfed.org/) (Federal Reserve Bank of St. Louis) e sono di pubblico dominio.
