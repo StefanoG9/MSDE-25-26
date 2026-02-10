@@ -2,7 +2,6 @@
 title: "Analisi Econometrica di Serie Storiche Macroeconomiche USA"
 subtitle: "Modelli Statistici per Dati Economici — Progetto Finale"
 author: ""
-date: today
 format:
   html:
     toc: true
@@ -1042,3 +1041,4 @@ La scelta del modello "migliore" non è univoca e dipende dall'obiettivo dell'an
 #| label: session-info
 sessionInfo()
 ```
+
