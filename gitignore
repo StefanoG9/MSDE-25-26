@@ -1,0 +1,17 @@
+# Chiavi e credenziali
+.Renviron
+.env
+
+# File R temporanei
+.Rhistory
+.Rdata
+.RData
+*.Rproj.user/
+
+# Output Quarto (opzionale — decommentare se non si vuole committare l'HTML)
+# progetto_msde.html
+# *_files/
+
+# OS
+.DS_Store
+Thumbs.db
