@@ -1,0 +1,1044 @@
+---
+title: "Analisi Econometrica di Serie Storiche Macroeconomiche USA"
+subtitle: "Modelli Statistici per Dati Economici — Progetto Finale"
+author: ""
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    theme: cosmo
+    code-fold: false
+    code-tools: true
+    fig-width: 10
+    fig-height: 6
+execute:
+  warning: false
+  message: false
+lang: it
+---
+
+# Introduzione
+
+## Obiettivo del progetto
+
+Questo progetto applica le metodologie di analisi delle serie storiche studiate nel corso di Modelli Statistici per Dati Economici (MSDE) a un dataset di variabili macroeconomiche statunitensi provenienti dal database FRED (Federal Reserve Economic Data). L'analisi segue un percorso progressivo che parte dall'esplorazione univariata fino ad arrivare alla modellazione multivariata e alla cointegrazione, coprendo i seguenti ambiti:
+
+-   **Analisi univariata**: decomposizione classica, identificazione e stima di modelli ARIMA secondo l'approccio Box-Jenkins, diagnostica dei residui e previsione.
+-   **Analisi bivariata e cross-correlazione**: studio delle relazioni dinamiche tra coppie di variabili tramite la funzione di cross-correlazione (CCF).
+-   **Modelli Transfer Function (TFM)**: identificazione di relazioni input-output tra variabili con prewhitening.
+-   **Modelli VAR**: stima di modelli vettoriali autoregressivi, selezione dell'ordine, test di Granger-causalità, funzioni di risposta all'impulso (IRF) e decomposizione della varianza dell'errore di previsione (FEVD).
+-   **Cointegrazione**: test di radice unitaria (ADF), procedura di Engle-Granger e procedura di Johansen per la stima del VECM.
+-   **Confronto tra modelli**: selezione del modello migliore sulla base di criteri informativi, accuratezza previsiva e coerenza economica.
+
+## Il dataset
+
+Il dataset contiene sei serie storiche mensili dal FRED, relative all'economia statunitense:
+
+| Variabile | Descrizione | Periodo |
+|------------------------|----------------------------|--------------------|
+| `produzione_industriale` | Indice di produzione industriale | Gen 1950 – Ago 2025 |
+| `indice_prezzi_consumo` | CPI — Indice dei prezzi al consumo | Gen 1950 – Ago 2025 |
+| `disoccupazione` | Tasso di disoccupazione (%) | Gen 1950 – Ago 2025 |
+| `tasso_fed_funds` | Tasso dei Federal Funds (%) | Lug 1954 – Ago 2025 |
+| `occupazione_non_agricola` | Occupati non agricoli (migliaia) | Gen 1950 – Ago 2025 |
+| `consumi_personali` | Consumi personali (miliardi di USD) | Gen 1959 – Ago 2025 |
+
+## Caricamento librerie e dati
+
+```{r}
+#| label: setup
+
+# Librerie principali
+library(readxl)      # Lettura file Excel
+library(tseries)     # Test ADF, funzioni per serie storiche
+library(forecast)    # Modelli ARIMA, auto.arima, diagnostica
+library(urca)        # Test di radice unitaria (ur.df), cointegrazione (ca.jo)
+library(vars)        # Modelli VAR, Granger-causalità, IRF, FEVD
+library(lmtest)      # Test diagnostici (Breusch-Godfrey, ecc.)
+library(dynlm)       # Modelli dinamici lineari
+library(ggplot2)     # Grafici
+library(gridExtra)   # Layout grafici multipli
+```
+
+```{r}
+#| label: load-data
+
+# Caricamento del foglio "mensili"
+dati <- read_excel("serie_macro_fred.xlsx", sheet = "mensili")
+
+# Rinominiamo le colonne per comodità
+colnames(dati) <- c("data", "prod_ind", "cpi", "disoccupazione",
+                     "fed_funds", "occupazione", "consumi")
+
+# Visualizzazione struttura
+str(dati)
+summary(dati)
+```
+
+Per garantire la massima disponibilità di osservazioni comuni, restringiamo il campione al periodo in cui tutte le variabili sono disponibili: da gennaio 1959 in poi (data di inizio dei consumi personali). Per il Transfer Function Model, che richiede il tasso dei Fed Funds, il campione partirà da luglio 1954.
+
+```{r}
+#| label: create-ts
+
+# Campione completo: da gennaio 1959 (tutte le variabili disponibili)
+dati_completo <- dati[dati$data >= as.Date("1959-01-01") & 
+                       !is.na(dati$consumi), ]
+
+# Creazione delle serie storiche ts
+prod_ind   <- ts(dati_completo$prod_ind, start = c(1959, 1), frequency = 12)
+cpi        <- ts(dati_completo$cpi, start = c(1959, 1), frequency = 12)
+disoc      <- ts(dati_completo$disoccupazione, start = c(1959, 1), frequency = 12)
+fed_funds  <- ts(dati_completo$fed_funds, start = c(1959, 1), frequency = 12)
+occupaz    <- ts(dati_completo$occupazione, start = c(1959, 1), frequency = 12)
+consumi    <- ts(dati_completo$consumi, start = c(1959, 1), frequency = 12)
+
+# Trasformazione logaritmica per le variabili con trend esponenziale
+log_prod   <- log(prod_ind)
+log_cpi    <- log(cpi)
+log_consumi <- log(consumi)
+log_occupaz <- log(occupaz)
+```
+
+```{r}
+#| label: plot-overview
+#| fig-height: 10
+
+par(mfrow = c(3, 2), mar = c(4, 4, 3, 1))
+plot(prod_ind, main = "Produzione Industriale", ylab = "Indice", col = "steelblue")
+plot(cpi, main = "CPI — Indice Prezzi al Consumo", ylab = "Indice", col = "firebrick")
+plot(disoc, main = "Tasso di Disoccupazione", ylab = "%", col = "darkgreen")
+plot(fed_funds, main = "Tasso Fed Funds", ylab = "%", col = "purple")
+plot(occupaz, main = "Occupazione Non Agricola", ylab = "Migliaia", col = "darkorange")
+plot(consumi, main = "Consumi Personali", ylab = "Mld USD", col = "brown")
+```
+
+Dall'ispezione visiva emergono chiaramente alcune caratteristiche: la produzione industriale, il CPI, l'occupazione e i consumi personali mostrano un trend crescente di lungo periodo, tipico delle serie I(1). Il tasso di disoccupazione presenta fluttuazioni cicliche attorno a un livello medio, mentre il tasso dei Fed Funds mostra un pattern altamente variabile legato alle decisioni di politica monetaria.
+
+# Analisi Univariata (MSDE_01)
+
+## Fondamenti teorici
+
+Una serie storica è un insieme di osservazioni misurate sequenzialmente nel tempo. Lo scopo dell'analisi è duplice: comprendere il meccanismo stocastico che genera la serie e prevedere i valori futuri sulla base della storia passata. La caratteristica fondamentale è che le osservazioni non possono essere considerate indipendenti: la dipendenza temporale è la chiave dell'analisi.
+
+### Decomposizione classica
+
+L'approccio classico decompone una serie in quattro componenti:
+
+$$X_t = T_t + S_t + C_t + \varepsilon_t$$
+
+dove $T_t$ è il trend (movimenti di lungo periodo nella media), $S_t$ sono gli effetti stagionali (fluttuazioni cicliche legate al calendario), $C_t$ è il ciclo (altre fluttuazioni cicliche come il ciclo economico) e $\varepsilon_t$ è la componente residuale, con $\varepsilon_t \sim WN(0, \sigma^2)$.
+
+```{r}
+#| label: decomposition
+#| fig-height: 8
+
+# Decomposizione additiva della produzione industriale
+decomp_prod <- decompose(prod_ind, type = "additive")
+plot(decomp_prod, col = "steelblue")
+title(main = "Decomposizione Additiva — Produzione Industriale", 
+      outer = TRUE, line = -1)
+```
+
+```{r}
+#| label: decomposition-cpi
+#| fig-height: 8
+
+# Decomposizione multiplicativa del CPI (più appropriata per serie con trend esponenziale)
+decomp_cpi <- decompose(cpi, type = "multiplicative")
+plot(decomp_cpi, col = "firebrick")
+title(main = "Decomposizione Multiplicativa — CPI", outer = TRUE, line = -1)
+```
+
+La decomposizione additiva è appropriata quando le fluttuazioni stagionali hanno ampiezza costante, mentre quella multiplicativa è preferibile quando l'ampiezza stagionale cresce proporzionalmente al livello della serie (come nel caso del CPI).
+
+### Approccio moderno: Box-Jenkins
+
+L'approccio moderno (Box-Jenkins) mira a costruire un modello stocastico che rappresenti bene i dati, nel senso che la serie osservata possa essere vista come una realizzazione del processo stocastico. Le fasi dell'analisi sono tre: specificazione del modello (identification), stima dei parametri (estimation) e valutazione del modello (evaluation/diagnostic checking).
+
+## Stazionarietà e ACF/PACF
+
+Un concetto fondamentale è quello di stazionarietà debole: un processo $\{Y_t\}$ è debolmente stazionario se la sua media $E[Y_t] = \mu$ è costante nel tempo, la varianza $Var(Y_t) = \sigma^2$ è finita e costante, e la funzione di autocovarianza $\gamma(h) = Cov(Y_t, Y_{t+h})$ dipende solo dal lag $h$ e non dal tempo $t$.
+
+La funzione di autocorrelazione (ACF) campionaria $\hat{\rho}(k)$ e la funzione di autocorrelazione parziale (PACF) campionaria $\hat{P}(k)$ sono gli strumenti principali per l'identificazione del modello. Per un processo white noise $\varepsilon_t \sim WN(0, \sigma^2)$, le autocorrelazioni campionarie sono approssimativamente $\hat{\rho}(k) \sim N(0, 1/n)$, il che consente di costruire le bande di confidenza $\pm 1.96/\sqrt{n}$.
+
+I pattern tipici sono: per un AR(p) la ACF decade esponenzialmente (o con oscillazioni smorzate) e la PACF si tronca al lag p; per un MA(q) la ACF si tronca al lag q e la PACF decade esponenzialmente; per un ARMA(p,q) entrambe decadono senza troncamento netto.
+
+```{r}
+#| label: acf-pacf-prod
+#| fig-height: 8
+
+# ACF e PACF della produzione industriale in livelli
+par(mfrow = c(2, 2), mar = c(4, 4, 3, 1))
+acf(log_prod, lag.max = 48, main = "ACF — log(Produzione Industriale)")
+pacf(log_prod, lag.max = 48, main = "PACF — log(Produzione Industriale)")
+
+# ACF e PACF delle differenze prime
+acf(diff(log_prod), lag.max = 48, main = "ACF — Δlog(Produzione Industriale)")
+pacf(diff(log_prod), lag.max = 48, main = "PACF — Δlog(Produzione Industriale)")
+```
+
+La ACF della serie in livelli decade molto lentamente, segno tipico di non stazionarietà. Dopo la differenziazione, la ACF mostra un pattern compatibile con stazionarietà, con possibili componenti stagionali ai lag multipli di 12.
+
+## Identificazione e stima del modello ARIMA
+
+Un modello ARIMA(p,d,q) è definito come:
+
+$$\phi(B)(1-B)^d Y_t = \theta(B)\varepsilon_t$$
+
+dove $\phi(B) = 1 - \phi_1 B - \ldots - \phi_p B^p$ è il polinomio autoregressivo, $\theta(B) = 1 + \theta_1 B + \ldots + \theta_q B^q$ è il polinomio a media mobile, $d$ è l'ordine di integrazione e $\varepsilon_t \sim WN(0, \sigma^2)$.
+
+Per dati mensili con stagionalità, si estende al modello SARIMA(p,d,q)(P,D,Q)\[12\]:
+
+$$\phi(B)\Phi(B^{12})(1-B)^d(1-B^{12})^D Y_t = \theta(B)\Theta(B^{12})\varepsilon_t$$
+
+Utilizziamo la funzione `auto.arima()` per la selezione automatica basata su criteri informativi (AIC, BIC), verificando poi il risultato con l'analisi manuale di ACF e PACF.
+
+```{r}
+#| label: arima-identification
+
+# Selezione automatica del modello ARIMA per log(produzione industriale)
+fit_auto <- auto.arima(log_prod, seasonal = TRUE, stepwise = FALSE, 
+                        approximation = FALSE, trace = FALSE)
+summary(fit_auto)
+```
+
+```{r}
+#| label: arima-manual
+
+# Verifica manuale: proviamo alcuni modelli alternativi
+fit1 <- Arima(log_prod, order = c(1, 1, 1), seasonal = c(0, 1, 1))
+fit2 <- Arima(log_prod, order = c(2, 1, 1), seasonal = c(0, 1, 1))
+fit3 <- Arima(log_prod, order = c(1, 1, 2), seasonal = c(1, 1, 1))
+
+# Confronto criteri informativi
+modelli_arima <- data.frame(
+  Modello = c("auto.arima", "ARIMA(1,1,1)(0,1,1)[12]", 
+              "ARIMA(2,1,1)(0,1,1)[12]", "ARIMA(1,1,2)(1,1,1)[12]"),
+  AIC = c(AIC(fit_auto), AIC(fit1), AIC(fit2), AIC(fit3)),
+  BIC = c(BIC(fit_auto), BIC(fit1), BIC(fit2), BIC(fit3)),
+  AICc = c(fit_auto$aicc, fit1$aicc, fit2$aicc, fit3$aicc)
+)
+knitr::kable(modelli_arima, digits = 2, 
+             caption = "Confronto criteri informativi — Modelli ARIMA")
+```
+
+## Diagnostica dei residui
+
+La valutazione del modello si basa sull'analisi dei residui, che devono comportarsi come un white noise. I controlli fondamentali sono: assenza di autocorrelazione (verificata tramite ACF dei residui e test di Ljung-Box), normalità dei residui e assenza di eteroschedasticità.
+
+Il test di Ljung-Box generalizzato verifica l'ipotesi nulla $H_0: \rho(1) = \rho(2) = \ldots = \rho(p) = 0$ contro l'alternativa che almeno una autocorrelazione sia diversa da zero. La statistica test è:
+
+$$Q(p) = T(T+2) \sum_{l=1}^{p} \frac{\hat{\rho}^2(l)}{T-l} \xrightarrow{d} \chi^2(p - p_{par})$$
+
+dove $p_{par}$ è il numero di parametri stimati nel modello.
+
+```{r}
+#| label: diagnostica-arima
+#| fig-height: 8
+
+# Selezioniamo il modello migliore (quello con AIC minore)
+best_arima <- fit_auto  # o il modello con AIC più basso dal confronto
+
+# Diagnostica completa
+checkresiduals(best_arima)
+```
+
+```{r}
+#| label: ljung-box-test
+
+# Test di Ljung-Box a diversi lag
+cat("=== Test di Ljung-Box sui residui ===\n")
+for (lag in c(12, 24, 36)) {
+  test <- Box.test(residuals(best_arima), lag = lag, type = "Ljung-Box",
+                   fitdf = length(coef(best_arima)))
+  cat(sprintf("Lag %d: Q = %.3f, p-value = %.4f\n", lag, test$statistic, test$p.value))
+}
+```
+
+```{r}
+#| label: normalita-residui
+
+# Test di Jarque-Bera per la normalità
+jb_test <- jarque.bera.test(residuals(best_arima))
+cat(sprintf("Test Jarque-Bera: statistica = %.3f, p-value = %.4f\n",
+            jb_test$statistic, jb_test$p.value))
+
+# QQ-plot
+par(mfrow = c(1, 1))
+qqnorm(residuals(best_arima), main = "QQ-Plot dei residui ARIMA")
+qqline(residuals(best_arima), col = "red")
+```
+
+## Previsione univariata
+
+```{r}
+#| label: forecast-arima
+#| fig-height: 5
+
+# Previsione a 12 mesi
+prev_arima <- forecast(best_arima, h = 12)
+plot(prev_arima, main = "Previsione ARIMA — log(Produzione Industriale)",
+     ylab = "log(Indice)", xlab = "Anno")
+```
+
+La previsione mostra gli intervalli di confidenza all'80% e al 95%. L'ampiezza crescente degli intervalli riflette l'incertezza che aumenta con l'orizzonte previsivo, una caratteristica fondamentale di tutti i modelli di serie storiche.
+
+# Analisi Bivariata e Cross-Correlazione (MSDE_02)
+
+## Fondamenti teorici
+
+Quando si considerano più serie storiche congiuntamente, si ottiene una capacità interpretativa e previsiva superiore rispetto all'analisi univariata. Una serie storica multipla $\mathbf{y}_t$ è rappresentata da un vettore $k$-dimensionale:
+
+$$\mathbf{y}_t = [y_{1,t}, y_{2,t}, \ldots, y_{k,t}]'$$
+
+I primi due momenti sono $E[\mathbf{y}_t] = \boldsymbol{\mu}$ (vettore $k \times 1$) e $V[\mathbf{y}_t] = \boldsymbol{\Sigma}$ (matrice $k \times k$).
+
+### Funzione di cross-covarianza e cross-correlazione
+
+La funzione di cross-covarianza tra due componenti $y_{i,t}$ e $y_{j,t}$ al lag $l$ è:
+
+$$\gamma_{ij}(l) = Cov(y_{i,t}, y_{j,t-l})$$
+
+e la corrispondente cross-correlazione è:
+
+$$\rho_{ij}(l) = \frac{\gamma_{ij}(l)}{\sqrt{\gamma_{ii}(0) \cdot \gamma_{jj}(0)}}$$
+
+Un aspetto cruciale è che la funzione di cross-covarianza **non è simmetrica**: $\gamma_{ij}(l) \neq \gamma_{ij}(-l)$ in generale, ma vale $\gamma_{ij}(l) = \gamma_{ji}(-l)$. Questo riflette il fatto che la relazione tra due variabili può essere diversa a seconda della direzione temporale.
+
+### Test di Ljung-Box multivariato
+
+Per verificare se una serie multipla è priva di auto- e cross-correlazione si usa la generalizzazione multivariata del test di Ljung-Box:
+
+$$Q_k(p) = T^2 \sum_{l=1}^{p} \frac{1}{T-l} \text{tr}\left[\hat{\Gamma}(l)'\hat{\Gamma}(0)^{-1}\hat{\Gamma}(l)\hat{\Gamma}(0)^{-1}\right] \xrightarrow{d} \chi^2(k^2 p)$$
+
+```{r}
+#| label: ccf-analysis
+#| fig-height: 10
+
+# Cross-correlazione tra coppie di variabili chiave
+# Lavoriamo sulle differenze prime per garantire stazionarietà
+
+d_log_prod <- diff(log_prod)
+d_disoc    <- diff(disoc)
+d_log_cpi  <- diff(log_cpi)
+d_fed      <- diff(fed_funds)
+
+par(mfrow = c(3, 1), mar = c(4, 4, 3, 1))
+
+# CCF tra variazione produzione industriale e variazione disoccupazione
+ccf(d_log_prod, d_disoc, lag.max = 24,
+    main = "CCF: Δlog(Prod. Ind.) e Δ(Disoccupazione)",
+    ylab = "CCF")
+
+# CCF tra variazione CPI e variazione Fed Funds
+ccf(d_log_cpi, d_fed, lag.max = 24,
+    main = "CCF: Δlog(CPI) e Δ(Fed Funds)",
+    ylab = "CCF")
+
+# CCF tra variazione produzione e variazione CPI
+ccf(d_log_prod, d_log_cpi, lag.max = 24,
+    main = "CCF: Δlog(Prod. Ind.) e Δlog(CPI)",
+    ylab = "CCF")
+```
+
+Nell'output della funzione `ccf(x, y)`, i lag negativi indicano che $x$ anticipa $y$ (cioè i valori passati di $x$ sono correlati con il valore corrente di $y$), mentre i lag positivi indicano che $y$ anticipa $x$. Questo è cruciale per interpretare la direzione della relazione dinamica tra le variabili.
+
+# Transfer Function Model (MSDE_03)
+
+## Fondamenti teorici
+
+Il modello Transfer Function (TFM) esprime la relazione tra una serie di output $y_t$ e una serie di input $x_t$ attraverso un filtro lineare:
+
+$$y_t = \nu(B)x_t + \eta_t$$
+
+dove $\nu(B) = \sum_{j=0}^{\infty} \nu_j B^j$ è la funzione di trasferimento, i coefficienti $\nu_j$ sono i pesi della risposta all'impulso (impulse response weights) e $\eta_t$ è la serie di disturbo (non necessariamente white noise), indipendente da $x_t$. Il TFM è stabile se $\sum |\nu_j| < \infty$ e causale se $\nu_j = 0$ per $j < 0$.
+
+### La relazione tra CCF e TFM
+
+Se le serie sono stazionarie con media zero, la cross-covarianza è legata ai pesi della risposta all'impulso da:
+
+$$\gamma_{yx}(k) = \nu_0 \gamma_x(k) + \nu_1 \gamma_x(k-1) + \nu_2 \gamma_x(k-2) + \ldots$$
+
+Se la serie di input è white noise ($\rho_x(k) = 0$ per $k \neq 0$), allora $\nu_k = \frac{\sigma_y}{\sigma_x}\rho_{yx}(k)$, cioè la funzione di risposta all'impulso è direttamente proporzionale alla CCF. In caso contrario, la relazione è "contaminata" dall'autocorrelazione dell'input, rendendo necessaria la procedura di **prewhitening**.
+
+### Procedura di costruzione del TFM
+
+1.  Stimare un modello ARMA per la serie di input $x_t$: $\phi_x(B)x_t = \theta_x(B)\alpha_t$
+2.  Filtrare la serie di output con lo stesso modello per ottenere $\beta_t = \frac{\phi_x(B)}{\theta_x(B)}y_t$
+3.  Calcolare la CCF campionaria tra $\alpha_t$ e $\beta_t$ per stimare i pesi della risposta all'impulso: $\hat{\nu}_k = \frac{\hat{\sigma}_\beta}{\hat{\sigma}_\alpha}\hat{\rho}_{\beta\alpha}(k)$
+4.  Identificare gli ordini $(r, s, b)$ del modello razionale $\nu(B) = \frac{\omega(B)}{\delta(B)}B^b$
+5.  Stimare il modello completo e verificare la diagnostica
+
+```{r}
+#| label: tfm-prewhitening
+
+# Transfer Function: Fed Funds (input) -> Disoccupazione (output)
+# Utilizziamo le differenze prime per la stazionarietà
+
+# Allineiamo le serie (entrambe dal 1959 in poi)
+input_x  <- d_fed       # Δ(Fed Funds) come input
+output_y <- d_disoc      # Δ(Disoccupazione) come output
+
+# Step 1: Modello ARMA per la serie di input (prewhitening)
+fit_input <- auto.arima(input_x, seasonal = FALSE, max.p = 5, max.q = 5)
+cat("=== Modello ARMA per l'input Δ(Fed Funds) ===\n")
+summary(fit_input)
+```
+
+```{r}
+#| label: tfm-whitened-ccf
+#| fig-height: 8
+
+# Step 2: Ottenere i residui (serie prewhitened)
+alpha_t <- residuals(fit_input)
+
+# Filtrare l'output con lo stesso modello
+# Usiamo la stessa struttura ARMA dell'input
+beta_t <- residuals(Arima(output_y, model = fit_input))
+
+# Step 3: CCF tra le serie prewhitened
+par(mfrow = c(2, 1), mar = c(4, 4, 3, 1))
+ccf(as.numeric(alpha_t), as.numeric(beta_t), lag.max = 20,
+    main = "CCF prewhitened: α(Fed Funds) e β(Disoccupazione)",
+    ylab = "CCF")
+
+# Per confronto: CCF senza prewhitening
+ccf(as.numeric(input_x), as.numeric(output_y), lag.max = 20,
+    main = "CCF senza prewhitening: Δ(Fed Funds) e Δ(Disoccupazione)",
+    ylab = "CCF")
+```
+
+La CCF dopo il prewhitening è più "pulita" e permette di identificare la struttura della funzione di trasferimento. Si noti che $\hat{\rho}_{\beta\alpha}(k) \approx 0$ per $k < 0$ conferma la causalità del sistema (l'output non anticipa l'input).
+
+```{r}
+#| label: tfm-estimation
+
+# Step 4-5: Stima del Transfer Function Model
+# Identifichiamo il ritardo b e gli ordini (r,s) dalla CCF prewhitened
+# Usiamo dynlm per una stima semplificata del modello
+
+# Modello con lag dell'input
+library(dynlm)
+dati_tfm <- ts.union(output_y, input_x)
+colnames(dati_tfm) <- c("y", "x")
+
+# Stima con diversi lag
+fit_tfm1 <- dynlm(y ~ L(x, 0:6), data = dati_tfm)
+summary(fit_tfm1)
+```
+
+```{r}
+#| label: tfm-diagnostics
+#| fig-height: 6
+
+# Diagnostica dei residui del TFM
+par(mfrow = c(2, 2), mar = c(4, 4, 3, 1))
+plot(residuals(fit_tfm1), main = "Residui TFM", ylab = "Residui", type = "l")
+acf(residuals(fit_tfm1), main = "ACF Residui TFM")
+pacf(residuals(fit_tfm1), main = "PACF Residui TFM")
+qqnorm(residuals(fit_tfm1), main = "QQ-Plot Residui TFM")
+qqline(residuals(fit_tfm1), col = "red")
+```
+
+Se i residui mostrano autocorrelazione, la componente di disturbo $\eta_t$ necessita di un modello ARMA, che va stimato congiuntamente con la funzione di trasferimento.
+
+# Modelli VAR (MSDE_04)
+
+## Fondamenti teorici
+
+I modelli VAR (Vector AutoRegressive) rappresentano uno degli strumenti più utilizzati in econometria per l'analisi congiunta di più serie storiche. A differenza dei modelli a equazioni simultanee strutturali, nei modelli VAR non è necessario specificare quali variabili sono endogene e quali esogene: tutte le variabili sono trattate come endogene. Questo è un vantaggio importante, poiché la classificazione endogeno/esogeno richiede restrizioni identificative basate su teoria economica che spesso è vaga nelle sue indicazioni.
+
+Un VAR(p) per un vettore $k$-dimensionale $\mathbf{y}_t$ è definito come:
+
+$$\mathbf{y}_t = \boldsymbol{\Phi}_0 + \boldsymbol{\Phi}_1 \mathbf{y}_{t-1} + \boldsymbol{\Phi}_2 \mathbf{y}_{t-2} + \ldots + \boldsymbol{\Phi}_p \mathbf{y}_{t-p} + \boldsymbol{\varepsilon}_t$$
+
+dove $\boldsymbol{\Phi}_0$ è un vettore di intercette $(k \times 1)$, $\boldsymbol{\Phi}_i$ sono matrici di coefficienti $(k \times k)$ e $\boldsymbol{\varepsilon}_t$ è un vettore di innovazioni con $E[\boldsymbol{\varepsilon}_t] = \mathbf{0}$ e $E[\boldsymbol{\varepsilon}_t \boldsymbol{\varepsilon}_t'] = \boldsymbol{\Sigma}$.
+
+### Stabilità e stazionarietà
+
+La condizione di stabilità (stazionarietà) di un VAR(p) è legata alle radici dell'equazione caratteristica. Per un VAR(1), le condizioni equivalenti sono: gli autovalori di $\boldsymbol{\Phi}_1$ hanno modulo minore di 1, oppure le radici di $|\mathbf{I}_k - \boldsymbol{\Phi}_1 z| = 0$ hanno modulo maggiore di 1.
+
+### Modelli impliciti per le componenti
+
+Un risultato importante è che ogni componente $y_{i,t}$ di un VAR(p) con $k$ variabili segue individualmente un modello ARMA con ordini massimi $(k, k-1)$. Questo mostra come il VAR catturi interdipendenze dinamiche che un approccio univariato non può cogliere.
+
+### Selezione dell'ordine
+
+Tre criteri informativi comunemente usati per un VAR(m) sono:
+
+$$AIC(m) = \log|\hat{\boldsymbol{\Sigma}}_m| + \frac{2}{T}mk^2$$
+
+$$BIC(m) = \log|\hat{\boldsymbol{\Sigma}}_m| + \frac{\log(T)}{T}mk^2$$
+
+$$HQ(m) = \log|\hat{\boldsymbol{\Sigma}}_m| + \frac{2\log(\log(T))}{T}mk^2$$
+
+dove $\hat{\boldsymbol{\Sigma}}_m$ è la stima ML della matrice di covarianza dei residui e $mk^2$ è il numero di parametri. Il criterio FPE (Final Prediction Error) di Akaike è:
+
+$$FPE(m) = \left(\frac{T + km + 1}{T - km - 1}\right)^k \left|\frac{\boldsymbol{\varepsilon}_m'\boldsymbol{\varepsilon}_m}{T}\right|$$
+
+## Stima del modello VAR
+
+Lavoriamo con tre variabili: produzione industriale, disoccupazione e CPI (in differenze logaritmiche dove appropriato per la stazionarietà).
+
+```{r}
+#| label: var-preparation
+
+# Preparazione dati per il VAR
+# Utilizziamo le differenze per garantire stazionarietà
+var_data <- ts.union(d_log_prod, d_disoc, d_log_cpi)
+colnames(var_data) <- c("D_LogProd", "D_Disoc", "D_LogCPI")
+
+# Rimuovere eventuali NA
+var_data <- na.omit(var_data)
+
+cat(sprintf("Dimensioni del dataset VAR: %d osservazioni x %d variabili\n",
+            nrow(var_data), ncol(var_data)))
+```
+
+```{r}
+#| label: var-order-selection
+
+# Selezione dell'ordine del VAR
+var_select <- VARselect(var_data, lag.max = 12, type = "const")
+print(var_select$selection)
+cat("\n=== Tabella completa dei criteri ===\n")
+print(round(var_select$criteria[, 1:12], 4))
+```
+
+```{r}
+#| label: var-estimation
+
+# Stima del VAR con l'ordine suggerito dal BIC (più parsimonioso)
+p_opt <- var_select$selection["SC(n)"]  # BIC = SC (Schwarz Criterion)
+cat(sprintf("Ordine selezionato dal BIC: p = %d\n", p_opt))
+
+fit_var <- VAR(var_data, p = p_opt, type = "const")
+summary(fit_var)
+```
+
+```{r}
+#| label: var-stability
+#| fig-height: 5
+
+# Verifica stabilità: le radici inverse devono essere all'interno del cerchio unitario
+roots_var <- roots(fit_var)
+cat("=== Radici inverse del polinomio caratteristico ===\n")
+print(roots_var)
+cat(sprintf("\nTutte le radici < 1? %s\n", ifelse(all(roots_var < 1), "SÌ — VAR stabile", "NO")))
+
+# Grafico delle radici
+plot(fit_var, names = colnames(var_data)[1])
+```
+
+## Diagnostica del VAR
+
+```{r}
+#| label: var-diagnostics
+
+# Test sui residui
+# Portmanteau test (Ljung-Box multivariato)
+serial_test <- serial.test(fit_var, lags.pt = 16, type = "PT.asymptotic")
+cat("=== Test Portmanteau per autocorrelazione residua ===\n")
+print(serial_test)
+
+# Test di normalità multivariata
+norm_test <- normality.test(fit_var, multivariate.only = TRUE)
+cat("\n=== Test di normalità multivariata ===\n")
+print(norm_test)
+```
+
+```{r}
+#| label: var-residual-plots
+#| fig-height: 8
+
+# Grafici dei residui
+par(mfrow = c(3, 2), mar = c(4, 4, 3, 1))
+for (i in 1:3) {
+  res_i <- residuals(fit_var)[, i]
+  plot(res_i, type = "l", main = paste("Residui —", colnames(var_data)[i]),
+       ylab = "Residui")
+  acf(res_i, main = paste("ACF Residui —", colnames(var_data)[i]))
+}
+```
+
+## Granger-Causalità
+
+La Granger-causalità valuta se i valori passati di una variabile $y_{1t}$ aiutano a prevedere un'altra variabile $y_{2t}$. Formalmente, $y_{1t}$ è Granger-causale per $y_{2t}$ se:
+
+$$\boldsymbol{\Sigma}_t(h|\Omega_t) < \boldsymbol{\Sigma}_t(h|\Omega_t \setminus \{y_{1s}: s \leq t\})$$
+
+cioè se il MSE di previsione migliora includendo l'informazione di $y_{1t}$. Il test si basa su un'ipotesi nulla di assenza di causalità (i coefficienti dei lag di $y_{1t}$ nell'equazione di $y_{2t}$ sono tutti zero) e si distribuisce come un $F$ sotto $H_0$.
+
+È importante sottolineare che il termine "causalità" è improprio: la Granger-causalità indica solo una correlazione tra il valore corrente di una variabile e i valori passati di un'altra, non una relazione causale in senso stretto.
+
+```{r}
+#| label: granger-causality
+
+# Test di Granger-causalità per tutte le coppie
+cat("=== Test di Granger-Causalità ===\n\n")
+
+nomi_var <- colnames(var_data)
+for (i in 1:3) {
+  causa <- causality(fit_var, cause = nomi_var[i])
+  cat(sprintf("--- %s causa le altre variabili? ---\n", nomi_var[i]))
+  cat(sprintf("F-statistica = %.3f, p-value = %.4f\n\n",
+              causa$Granger$statistic, causa$Granger$p.value))
+}
+```
+
+## Funzioni di Risposta all'Impulso (IRF)
+
+Le impulse response functions tracciano la risposta delle variabili dipendenti nel VAR a shock unitari su ciascuna variabile. Per ottenerle, si esprime il VAR in forma VMA (Vector Moving Average). Per un VAR stabile, lo shock dovrebbe gradualmente esaurirsi.
+
+Per risolvere il problema della correlazione contemporanea tra gli errori delle diverse equazioni, si utilizza la decomposizione di Cholesky, che impone un ordinamento ricorsivo delle variabili. Questo ordinamento implica che la prima variabile non è influenzata contemporaneamente dalle altre, la seconda può essere influenzata solo dalla prima, e così via.
+
+```{r}
+#| label: irf-analysis
+#| fig-height: 10
+
+# IRF ortogonalizzate (Cholesky)
+irf_result <- irf(fit_var, impulse = nomi_var, response = nomi_var,
+                   n.ahead = 24, ortho = TRUE, boot = TRUE, runs = 500)
+
+# Grafici
+par(mfrow = c(3, 3), mar = c(4, 4, 3, 1))
+plot(irf_result)
+```
+
+```{r}
+#| label: irf-selected
+#| fig-height: 8
+
+# IRF selezionate: shock alla produzione -> effetti su tutte le variabili
+irf_prod <- irf(fit_var, impulse = "D_LogProd", response = nomi_var,
+                 n.ahead = 24, ortho = TRUE, boot = TRUE, runs = 500, ci = 0.95)
+plot(irf_prod, main = "IRF: Shock alla Produzione Industriale")
+```
+
+L'ordinamento delle variabili nel VAR influenza i risultati delle IRF ortogonalizzate. Come suggerito dalla teoria, è opportuno verificare la sensibilità dei risultati invertendo l'ordinamento. Quando i residui sono poco correlati tra equazioni, l'ordinamento ha poca influenza.
+
+## Decomposizione della Varianza (FEVD)
+
+La FEVD (Forecast Error Variance Decomposition) quantifica la proporzione della varianza dell'errore di previsione di ciascuna variabile attribuibile a shock provenienti da ciascuna delle variabili del sistema, a diversi orizzonti temporali.
+
+```{r}
+#| label: fevd-analysis
+#| fig-height: 8
+
+# FEVD
+fevd_result <- fevd(fit_var, n.ahead = 24)
+
+# Grafici
+plot(fevd_result)
+```
+
+```{r}
+#| label: fevd-table
+
+# Tabella FEVD a orizzonti selezionati
+cat("=== FEVD a 1, 6, 12, 24 mesi ===\n\n")
+for (var_name in nomi_var) {
+  cat(sprintf("--- Variabile: %s ---\n", var_name))
+  fevd_tab <- fevd_result[[var_name]]
+  print(round(fevd_tab[c(1, 6, 12, 24), ], 4))
+  cat("\n")
+}
+```
+
+## Previsione VAR
+
+```{r}
+#| label: var-forecast
+#| fig-height: 8
+
+# Previsione a 12 mesi
+prev_var <- predict(fit_var, n.ahead = 12, ci = 0.95)
+plot(prev_var)
+```
+
+# Cointegrazione (MSDE_05)
+
+## Fondamenti teorici
+
+### Integrazione e test di radice unitaria
+
+Una serie è integrata di ordine $d$, indicata come $I(d)$, se necessita di $d$ differenziazioni per diventare stazionaria. Per verificare la presenza di una radice unitaria si utilizza il test di Dickey-Fuller, basato sulla regressione:
+
+$$\Delta y_t = \alpha + \gamma t + \delta y_{t-1} + \varepsilon_t$$
+
+L'ipotesi nulla è $H_0: \delta = 0$ (presenza di radice unitaria). Se $\delta = 0$, la serie è $I(1)$ con trend stocastico; se $\delta < 0$, la serie è stazionaria (eventualmente attorno a un trend). La statistica test segue una distribuzione non standard (distribuzione di Dickey-Fuller), con quantili spostati a sinistra rispetto alla normale.
+
+Il test ADF (Augmented Dickey-Fuller) estende il DF a strutture più complesse:
+
+$$\Delta y_t = \alpha + \gamma t + \delta y_{t-1} + \sum_{j=1}^{p} \beta_j \Delta y_{t-j} + \varepsilon_t$$
+
+La scelta del numero di lag $p$ è cruciale: troppo pochi lag non rimuovono l'autocorrelazione nei residui (bias nel test), troppi lag consumano gradi di libertà e riducono la potenza. Si può usare la procedura iterativa di Ng e Perron o criteri informativi.
+
+La procedura step-by-step prevede: (1) stimare il modello con intercetta e trend, testare $\delta = 0$; se si rifiuta, la serie è stazionaria; se non si rifiuta, (2) verificare la significatività del trend con test congiunti ($\phi_2$, $\phi_3$); (3) se il trend non è significativo, riestimare senza trend e ripetere il test.
+
+```{r}
+#| label: unit-root-tests
+
+# Test ADF per tutte le variabili in livelli e differenze
+cat("=========================================\n")
+cat("  TEST DI RADICE UNITARIA (ADF)\n")
+cat("=========================================\n\n")
+
+serie_test <- list(
+  "log(Produzione Industriale)" = log_prod,
+  "log(CPI)" = log_cpi,
+  "Disoccupazione" = disoc,
+  "Fed Funds" = fed_funds,
+  "log(Occupazione)" = log_occupaz,
+  "log(Consumi)" = log_consumi
+)
+
+risultati_adf <- data.frame(
+  Serie = character(), 
+  Livelli_tau = numeric(), Livelli_pval = character(),
+  Diff_tau = numeric(), Diff_pval = character(),
+  Ordine = character(),
+  stringsAsFactors = FALSE
+)
+
+for (nome in names(serie_test)) {
+  serie <- serie_test[[nome]]
+  
+  # Test in livelli (con trend e intercetta)
+  adf_lev <- ur.df(serie, type = "trend", lags = 12, selectlags = "AIC")
+  tau_lev <- adf_lev@teststat[1, "tau3"]
+  cv_lev <- adf_lev@cval[1, ]
+  
+  # Test in differenze (con intercetta)
+  dserie <- diff(serie)
+  adf_diff <- ur.df(dserie, type = "drift", lags = 12, selectlags = "AIC")
+  tau_diff <- adf_diff@teststat[1, "tau2"]
+  cv_diff <- adf_diff@cval[1, ]
+  
+  # Determinare significatività
+  sig_lev <- ifelse(tau_lev < cv_lev["5pct"], "< 0.05", "> 0.05")
+  sig_diff <- ifelse(tau_diff < cv_diff["5pct"], "< 0.05", "> 0.05")
+  
+  ordine <- ifelse(sig_lev == "< 0.05", "I(0)",
+                   ifelse(sig_diff == "< 0.05", "I(1)", "I(2)?"))
+  
+  risultati_adf <- rbind(risultati_adf, data.frame(
+    Serie = nome,
+    Livelli_tau = round(tau_lev, 3),
+    Livelli_pval = sig_lev,
+    Diff_tau = round(tau_diff, 3),
+    Diff_pval = sig_diff,
+    Ordine = ordine,
+    stringsAsFactors = FALSE
+  ))
+  
+  cat(sprintf("--- %s ---\n", nome))
+  cat(sprintf("  Livelli: tau3 = %.3f (CV 5%%: %.3f) -> %s\n", 
+              tau_lev, cv_lev["5pct"], sig_lev))
+  cat(sprintf("  Differenze: tau2 = %.3f (CV 5%%: %.3f) -> %s\n", 
+              tau_diff, cv_diff["5pct"], sig_diff))
+  cat(sprintf("  -> Serie %s\n\n", ordine))
+}
+```
+
+```{r}
+#| label: unit-root-summary
+
+knitr::kable(risultati_adf, 
+             col.names = c("Serie", "τ (livelli)", "p-value", 
+                           "τ (diff)", "p-value", "Ordine I(d)"),
+             caption = "Risultati dei test ADF di radice unitaria")
+```
+
+### Esempio dettagliato: procedura step-by-step per log(CPI)
+
+```{r}
+#| label: adf-detailed
+
+# Procedura completa per log(CPI) come nell'esempio del corso
+cat("=== Procedura ADF step-by-step per log(CPI) ===\n\n")
+
+# Step 1: Modello con trend e intercetta
+adf_step1 <- ur.df(log_cpi, type = "trend", lags = 12, selectlags = "AIC")
+cat("Step 1: Modello con trend e intercetta\n")
+summary(adf_step1)
+
+# Step 2: Verificare se servono drift e trend (phi2, phi3)
+cat("\nStep 2: Test congiunti\n")
+cat(sprintf("tau3 = %.3f\n", adf_step1@teststat[1, "tau3"]))
+cat(sprintf("phi2 (H0: delta=alpha=gamma=0) = %.3f\n", adf_step1@teststat[1, "phi2"]))
+cat(sprintf("phi3 (H0: delta=gamma=0) = %.3f\n", adf_step1@teststat[1, "phi3"]))
+```
+
+## Cointegrazione
+
+### Concetto
+
+Un insieme di variabili $I(1)$ è cointegrato se esiste una combinazione lineare $\boldsymbol{\beta}'\mathbf{y}_t$ che è $I(0)$. Il vettore $\boldsymbol{\beta}$ è detto vettore di cointegrazione e rappresenta una relazione di equilibrio di lungo periodo. Deviazioni dall'equilibrio sono temporanee: le forze di mercato riportano il sistema verso l'equilibrio.
+
+### Procedura di Engle-Granger
+
+La procedura si articola in tre passi:
+
+1.  Verificare che tutte le variabili siano $I(1)$ (condizione necessaria per la cointegrazione)
+2.  Stimare la relazione di cointegrazione con OLS: $y_{1,t} = \beta_2 y_{2,t} + \ldots + \beta_k y_{k,t} + \varepsilon_t$
+3.  Testare la stazionarietà dei residui $\hat{\varepsilon}_t$ con un test ADF, usando valori critici specifici (Engle-Yoo / MacKinnon) che tengono conto del fatto che $\hat{\boldsymbol{\beta}}$ è stimato
+
+Se i residui sono $I(0)$, le variabili sono cointegrate. I valori critici sono più stringenti rispetto al test ADF standard, perché per costruzione l'OLS minimizza la varianza dei residui, rendendoli "più stazionari" anche in assenza di vera cointegrazione.
+
+Sotto cointegrazione, si stima poi il modello a correzione dell'errore (ECM):
+
+$$\Delta y_t = \beta_0 \Delta x_t + \tilde{\alpha}(\hat{\varepsilon}_{t-1}) + \eta_t$$
+
+dove $\tilde{\alpha}$ è la velocità di aggiustamento verso l'equilibrio (deve essere negativo per avere convergenza).
+
+```{r}
+#| label: engle-granger
+#| fig-height: 8
+
+# Procedura di Engle-Granger
+# Selezioniamo le variabili I(1): log(Prod), log(CPI), log(Occupazione), log(Consumi)
+
+# Step 1: Regressione di cointegrazione (OLS)
+# log(Consumi) = f(log(Produzione), log(CPI))
+coint_reg <- lm(log_consumi ~ log_prod + log_cpi)
+summary(coint_reg)
+
+# Step 2: Estrarre i residui e testarli per radice unitaria
+residui_coint <- ts(residuals(coint_reg), start = start(log_consumi), 
+                    frequency = 12)
+
+par(mfrow = c(2, 2), mar = c(4, 4, 3, 1))
+plot(residui_coint, main = "Residui di cointegrazione", ylab = "Residui")
+abline(h = 0, col = "red", lty = 2)
+acf(residui_coint, main = "ACF residui di cointegrazione")
+pacf(residui_coint, main = "PACF residui di cointegrazione")
+
+# Test ADF sui residui (valori critici Engle-Granger)
+adf_coint <- ur.df(residui_coint, type = "none", lags = 12, selectlags = "AIC")
+cat("\n=== Test ADF sui residui di cointegrazione ===\n")
+summary(adf_coint)
+
+cat("\nNota: I valori critici per il test di Engle-Granger con 3 variabili I(1)")
+cat("\nsono più stringenti dei DF standard:")
+cat("\n1%: -3.96, 5%: -3.41, 10%: -3.13 (con intercetta)\n")
+cat(sprintf("Statistica tau: %.3f\n", adf_coint@teststat[1]))
+```
+
+```{r}
+#| label: ecm-estimation
+
+# Step 3: Stima del modello ECM (Error Correction Model)
+# Se c'è cointegrazione, stimiamo l'ECM
+
+d_log_consumi <- diff(log_consumi)
+d_log_prod_c  <- diff(log_prod)
+d_log_cpi_c   <- diff(log_cpi)
+ect <- residui_coint[-length(residui_coint)]  # ECT ritardato di 1
+
+# Allineare le lunghezze
+n <- min(length(d_log_consumi), length(d_log_prod_c), 
+         length(d_log_cpi_c), length(ect))
+dati_ecm <- data.frame(
+  dy = tail(d_log_consumi, n),
+  dx1 = tail(d_log_prod_c, n),
+  dx2 = tail(d_log_cpi_c, n),
+  ect_lag = tail(ect, n)
+)
+
+fit_ecm <- lm(dy ~ dx1 + dx2 + ect_lag, data = dati_ecm)
+cat("=== Modello a Correzione dell'Errore (ECM) ===\n")
+summary(fit_ecm)
+
+cat(sprintf("\nCoeff. ECT (velocità di aggiustamento): %.4f\n", coef(fit_ecm)["ect_lag"]))
+cat("Un valore negativo e significativo indica convergenza verso l'equilibrio.\n")
+```
+
+### Procedura di Johansen
+
+La procedura di Johansen è più generale della Engle-Granger: permette di testare il rango di cointegrazione $r$ e stimare molteplici relazioni di cointegrazione in un contesto VECM (Vector Error Correction Model):
+
+$$\Delta \mathbf{y}_t = \boldsymbol{\Pi} \mathbf{y}_{t-1} + \sum_{i=1}^{k-1} \boldsymbol{\Gamma}_i \Delta \mathbf{y}_{t-i} + \mathbf{u}_t$$
+
+dove $\boldsymbol{\Pi} = \boldsymbol{\alpha}\boldsymbol{\beta}'$, con $\boldsymbol{\beta}$ matrice dei vettori di cointegrazione e $\boldsymbol{\alpha}$ matrice dei coefficienti di aggiustamento (loading).
+
+Il test si basa sull'esame del rango della matrice $\boldsymbol{\Pi}$ attraverso i suoi autovalori $\hat{\lambda}_1 \geq \hat{\lambda}_2 \geq \ldots \geq \hat{\lambda}_g$. Le due statistiche test sono:
+
+$$\lambda_{trace}(r) = -T \sum_{i=r+1}^{g} \ln(1 - \hat{\lambda}_i)$$
+
+$$\lambda_{max}(r, r+1) = -T \ln(1 - \hat{\lambda}_{r+1})$$
+
+Se $\boldsymbol{\Pi}$ ha rango zero, non c'è cointegrazione. Se ha rango pieno $g$, le variabili sono stazionarie. Se ha rango $r$ con $0 < r < g$, esistono $r$ relazioni di cointegrazione.
+
+```{r}
+#| label: johansen-test
+
+# Preparazione dati per Johansen
+# Usiamo le variabili in livelli (log)
+johansen_data <- ts.union(log_consumi, log_prod, log_cpi)
+colnames(johansen_data) <- c("log_Consumi", "log_Prod", "log_CPI")
+johansen_data <- na.omit(johansen_data)
+
+# Selezione del lag ottimale per il VECM
+# Il VECM con k lag corrisponde a un VAR con k+1 lag
+var_select_j <- VARselect(johansen_data, lag.max = 12, type = "const")
+cat("=== Selezione ordine per il VECM ===\n")
+print(var_select_j$selection)
+
+k_vecm <- var_select_j$selection["SC(n)"]  # BIC
+```
+
+```{r}
+#| label: johansen-trace
+
+# Test trace di Johansen
+cat("=== Test Trace di Johansen ===\n")
+jo_trace <- ca.jo(johansen_data, type = "trace", ecdet = "const", K = k_vecm)
+summary(jo_trace)
+```
+
+```{r}
+#| label: johansen-eigen
+
+# Test max eigenvalue di Johansen
+cat("=== Test Max Eigenvalue di Johansen ===\n")
+jo_eigen <- ca.jo(johansen_data, type = "eigen", ecdet = "const", K = k_vecm)
+summary(jo_eigen)
+```
+
+```{r}
+#| label: vecm-estimation
+
+# Stima del VECM con il rango di cointegrazione identificato
+# Supponiamo r = 1 (da verificare con i risultati dei test sopra)
+# Se i test indicano r diverso, modificare di conseguenza
+
+cat("=== Stima del VECM ===\n")
+
+# Determiniamo il rango dai risultati del test
+# (il rango è il numero di ipotesi H0 rifiutate in sequenza)
+vecm <- cajorls(jo_trace, r = 1)
+
+cat("\n--- Vettore di cointegrazione (beta normalizzato) ---\n")
+print(vecm$beta)
+
+cat("\n--- Coefficienti di aggiustamento (alpha) ---\n")
+print(vecm$rlm$coefficients[1, ])
+```
+
+```{r}
+#| label: vecm-to-var
+
+# Conversione VECM -> VAR per previsioni e diagnostica
+vecm_var <- vec2var(jo_trace, r = 1)
+
+# Diagnostica
+serial_vecm <- serial.test(vecm_var, lags.pt = 16, type = "PT.asymptotic")
+cat("=== Test Portmanteau su residui VECM ===\n")
+print(serial_vecm)
+```
+
+```{r}
+#| label: vecm-forecast
+#| fig-height: 8
+
+# Previsione dal VECM
+prev_vecm <- predict(vecm_var, n.ahead = 12, ci = 0.95)
+plot(prev_vecm)
+```
+
+# Confronto tra Modelli e Selezione Finale
+
+## Riepilogo dei modelli stimati
+
+In questo progetto sono stati stimati diversi modelli per analizzare le serie macroeconomiche USA:
+
+1.  **ARIMA univariato**: modello per la singola serie (produzione industriale), cattura la dinamica temporale individuale inclusa la stagionalità.
+2.  **Transfer Function Model**: relazione unidirezionale input-output tra Fed Funds e disoccupazione, con prewhitening per eliminare la contaminazione dell'autocorrelazione dell'input.
+3.  **VAR**: modello multivariato simmetrico per produzione, disoccupazione e CPI, che tratta tutte le variabili come endogene.
+4.  **VECM**: modello a correzione dell'errore per consumi, produzione e CPI, che incorpora le relazioni di equilibrio di lungo periodo.
+
+## Confronto quantitativo
+
+```{r}
+#| label: model-comparison
+
+# Confronto basato sulla previsione in-sample e criteri informativi
+cat("=== CONFRONTO TRA MODELLI ===\n\n")
+
+# 1. ARIMA
+cat("1. ARIMA univariato (Produzione Industriale)\n")
+cat(sprintf("   AIC = %.2f, BIC = %.2f\n", AIC(best_arima), BIC(best_arima)))
+cat(sprintf("   σ² residui = %.6f\n", best_arima$sigma2))
+
+# 2. VAR
+cat("\n2. VAR multivariato\n")
+for (i in 1:3) {
+  eq_name <- names(fit_var$varresult)[i]
+  aic_i <- AIC(fit_var$varresult[[i]])
+  bic_i <- BIC(fit_var$varresult[[i]])
+  cat(sprintf("   Eq. %s: AIC = %.2f, BIC = %.2f\n", eq_name, aic_i, bic_i))
+}
+
+# 3. Confronto previsivo: RMSE in-sample per la produzione industriale
+rmse_arima <- sqrt(mean(residuals(best_arima)^2))
+rmse_var   <- sqrt(mean(residuals(fit_var)[, "D_LogProd"]^2, na.rm = TRUE))
+
+cat(sprintf("\n--- RMSE in-sample per Δlog(Prod) ---\n"))
+cat(sprintf("   ARIMA: %.6f\n", rmse_arima))
+cat(sprintf("   VAR:   %.6f\n", rmse_var))
+```
+
+## Confronto qualitativo: differenze tra i modelli
+
+```{r}
+#| label: comparison-table
+
+confronto <- data.frame(
+  Criterio = c("N. variabili", "Relazioni dinamiche", 
+               "Relazioni di lungo periodo", "Direzione causalità",
+               "Stagionalità", "Previsione",
+               "Interpretabilità", "N. parametri"),
+  ARIMA = c("1 (univariato)", "Solo autocorrelazione", 
+            "No (stazionario/differenziato)", "N/A",
+            "Sì (SARIMA)", "Solo variabile target",
+            "Alta", "Basso"),
+  TFM = c("2 (input-output)", "Unidirezionale",
+          "No", "Imposta dal ricercatore",
+          "Possibile", "Solo variabile output",
+          "Media", "Medio"),
+  VAR = c("k (tutte endogene)", "Bidirezionali/multilaterali",
+          "No (serie stazionarie)", "Testata (Granger)",
+          "Possibile", "Tutte le variabili",
+          "Media (IRF, FEVD)", "Alto (k²p)"),
+  VECM = c("k (tutte endogene)", "Bidirezionali + equilibrio",
+           "Sì (cointegrazione)", "Testata + ECT",
+           "Possibile", "Tutte + convergenza LR",
+           "Alta (relaz. economiche)", "Alto")
+)
+
+knitr::kable(confronto, caption = "Confronto qualitativo tra i modelli")
+```
+
+## Discussione e selezione del modello migliore
+
+La scelta del modello "migliore" non è univoca e dipende dall'obiettivo dell'analisi.
+
+**Per la previsione univariata a breve termine**, il modello ARIMA (o SARIMA) è spesso la scelta più efficiente: è parsimonioso, cattura la stagionalità, e non richiede la specificazione di relazioni tra variabili. Il suo limite è che ignora completamente l'informazione contenuta in altre variabili potenzialmente rilevanti.
+
+**Per comprendere le interazioni dinamiche** tra variabili macroeconomiche (come produzione, inflazione e disoccupazione), il VAR è lo strumento naturale. La Granger-causalità, le IRF e la FEVD forniscono un quadro completo delle interdipendenze. Tuttavia, il VAR richiede serie stazionarie e non cattura relazioni di equilibrio di lungo periodo.
+
+**Il Transfer Function Model** è appropriato quando la teoria economica suggerisce una relazione unidirezionale chiara tra input e output (es. la politica monetaria influenza la disoccupazione con un ritardo). Il suo vantaggio è la parsimonia rispetto al VAR e la possibilità di modellare esplicitamente la struttura dei ritardi.
+
+**Il VECM è il modello più completo** quando le serie sono $I(1)$ e cointegrate: incorpora sia le dinamiche di breve periodo (attraverso i termini in differenze, come il VAR) sia le relazioni di equilibrio di lungo periodo (attraverso il termine di correzione dell'errore). Il VECM è quindi preferibile al VAR in differenze, poiché quest'ultimo ignorerebbe le relazioni di lungo periodo, perdendo informazione rilevante contenuta nei livelli delle serie.
+
+**In sintesi**: la scelta dipende dall'obiettivo specifico dell'analisi, dalla natura dei dati (stazionari o integrati, cointegrati o meno), e dal compromesso tra complessità del modello e interpretabilità dei risultati. Per serie macroeconomiche $I(1)$ con relazioni di equilibrio — come quelle analizzate in questo progetto — il VECM rappresenta generalmente la scelta metodologicamente più appropriata.
+
+# Appendice: Pacchetti R utilizzati
+
+```{r}
+#| label: session-info
+sessionInfo()
+```
