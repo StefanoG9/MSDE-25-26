@@ -14,7 +14,7 @@ library(writexl)
 
 
 # Set your FRED API key
-# La chiave viene letta dal file .Renviron (NON committare mai la chiave nel codice!)
+# La chiave viene letta dal file .Renviron
 # Per configurarla:
 #   1. Crea un file .Renviron nella cartella del progetto (o nella home ~/)
 #   2. Aggiungi la riga: FRED_API_KEY=la_tua_chiave_qui
