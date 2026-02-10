@@ -1,0 +1,17 @@
+# Chiavi e credenziali
+.Renviron
+.env
+
+# File R temporanei
+.Rhistory
+.Rdata
+.RData
+*.Rproj.user/
+
+# Output Quarto (il report si genera con: quarto render progetto_msde.qmd)
+progetto_msde.html
+*_files/
+
+# OS
+.DS_Store
+Thumbs.db
