@@ -127,7 +127,7 @@ install.packages(c(
 
 1. Clonare il repository:
    ```bash
-   git clone https://github.com/<username>/progetto-msde.git
+   git clone https://github.com/StefanoG9/progetto-msde.git
    cd progetto-msde
    ```
 
