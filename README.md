@@ -23,6 +23,8 @@ Il file `serie_macro_fred.xlsx` (foglio **mensili**) contiene sei serie storiche
 
 Il campione di analisi va da **gennaio 1959** (prima data con tutte le variabili disponibili) ad **agosto 2025**, per un totale di circa 800 osservazioni mensili.
 
+<img width="1920" height="1920" alt="plot-overview-1" src="https://github.com/user-attachments/assets/764e94b0-f3ff-432b-a3ec-fe17ef063ca0" />
+
 ## Struttura del progetto
 
 ```
@@ -47,11 +49,17 @@ Il campione di analisi va da **gennaio 1959** (prima data con tutte le variabili
 - **Diagnostica dei residui**: test di Ljung-Box, test di Jarque-Bera per la normalità, QQ-plot
 - **Previsione** a 12 mesi con intervalli di confidenza al 80% e 95%
 
+<img width="1920" height="960" alt="image" src="https://github.com/user-attachments/assets/632d3009-8400-4cf7-871f-32e8ae701033" />
+
+
 ### 2. Analisi bivariata e cross-correlazione (MSDE_02)
 
 - **Cross-correlazione (CCF)** tra coppie di variabili in differenze: Δlog(Prod. Ind.) vs Δ(Disoccupazione), Δlog(CPI) vs Δ(Fed Funds), Δlog(Prod. Ind.) vs Δlog(CPI)
 - Forte correlazione negativa contemporanea tra produzione e disoccupazione (coerente con la legge di Okun)
 - Correlazione positiva ai lag positivi tra CPI e Fed Funds (la politica monetaria reagisce all'inflazione con ritardo)
+
+<img width="1920" height="1920" alt="image" src="https://github.com/user-attachments/assets/19185d67-bff7-4950-b9b8-d297cf697edd" />
+
 
 ### 3. Transfer Function Model (MSDE_03)
 
@@ -59,6 +67,9 @@ Il campione di analisi va da **gennaio 1959** (prima data con tutte le variabili
 - **CCF filtrata** tra residui prewhitened per l'identificazione della funzione di trasferimento
 - Stima del TFM: Δ(Fed Funds) → Δ(Disoccupazione) con lag distribuiti
 - Confronto tra CCF grezza e prewhitened: il prewhitening rimuove la contaminazione dell'autocorrelazione dell'input, producendo una CCF più pulita
+
+<img width="1920" height="1152" alt="image" src="https://github.com/user-attachments/assets/4037de70-4742-45cd-9516-c150dd382fb2" />
+
 
 ### 4. Modelli VAR (MSDE_04)
 
@@ -68,12 +79,18 @@ Il campione di analisi va da **gennaio 1959** (prima data con tutte le variabili
 - **Impulse Response Functions (IRF)** ortogonalizzate (Cholesky, 500 bootstrap): uno shock positivo alla produzione riduce la disoccupazione per circa 5 mesi prima di esaurirsi; l'effetto sul CPI è trascurabile
 - **FEVD**: la varianza dell'errore di previsione della disoccupazione è spiegata per circa il 50% dalla produzione industriale, confermando la forte interdipendenza tra settore reale e mercato del lavoro
 
+<img width="1920" height="1536" alt="image" src="https://github.com/user-attachments/assets/b6ffff3a-239c-4400-a103-75899efa7de6" />
+
+
 ### 5. Cointegrazione (MSDE_05)
 
 - **Test ADF di radice unitaria** (procedura step-by-step con trend, drift e senza) su tutte le serie: log(Prod), log(CPI), log(Consumi), log(Occupazione) risultano I(1); la disoccupazione è stazionaria o borderline
 - **Procedura di Engle-Granger**: regressione di cointegrazione log(Consumi) ~ log(Prod) + log(CPI); i residui mostrano forte persistenza (ACF che decade lentamente), indicando assenza di cointegrazione tra queste tre variabili con questa specifica combinazione lineare
 - **Stima ECM**: il coefficiente dell'error correction term, pur negativo, è molto piccolo, confermando la debolezza della relazione di lungo periodo
 - **Procedura di Johansen** (test trace e max eigenvalue): applicata al sistema trivariato log(Consumi), log(Prod), log(CPI) per determinare il rango di cointegrazione e stimare il VECM
+
+<img width="1920" height="1536" alt="image" src="https://github.com/user-attachments/assets/56fe7b0a-2ca5-479a-be15-2d28886fd44c" />
+
 
 ### 6. Confronto tra modelli e selezione finale
 
