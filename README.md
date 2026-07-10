@@ -19,9 +19,9 @@ Il file `serie_macro_fred.xlsx` (foglio **mensili**) contiene sei serie storiche
 | Disoccupazione | Tasso di disoccupazione (%) | Gen 1950 – Ago 2025 |
 | Tasso Fed Funds | Tasso dei Federal Funds (%) | Lug 1954 – Ago 2025 |
 | Occupazione non agricola | Occupati non agricoli (migliaia) | Gen 1950 – Ago 2025 |
-| Consumi personali | Consumi personali (mld USD) | Gen 1959 – Ago 2025 |
+| Consumi personali | Consumi personali (mld USD) | Gen 1959 – Lug 2025 |
 
-Il campione di analisi va da **gennaio 1959** (prima data con tutte le variabili disponibili) ad **agosto 2025**, per un totale di circa 800 osservazioni mensili.
+Il campione di analisi va da **gennaio 1959** (prima data con tutte le variabili disponibili) a **luglio 2025** (ultima data con tutte le variabili disponibili), per un totale di 799 osservazioni mensili.
 
 <img width="1920" height="1920" alt="plot-overview-1" src="https://github.com/user-attachments/assets/764e94b0-f3ff-432b-a3ec-fe17ef063ca0" />
 
@@ -144,8 +144,8 @@ install.packages(c(
 
 1. Clonare il repository:
    ```bash
-   git clone https://github.com/StefanoG9/progetto-msde.git
-   cd progetto-msde
+   git clone https://github.com/StefanoG9/MSDE-25-26.git
+   cd MSDE-25-26
    ```
 
 2. **(Opzionale) Configurare la API key FRED** per riscaricare i dati da zero:
